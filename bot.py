@@ -2,6 +2,9 @@ import os
 import io
 import sqlite3
 import logging
+import numpy as np
+from PIL import Image
+import easyocr
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import (
@@ -23,15 +26,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger("BUNA_BONUS_P2P_BOT")
 
+# AI OCR Reader Initialization
+logger.info("Initializing AI OCR Engine...")
+ocr_reader = easyocr.Reader(['en'], gpu=False)
+
 # -----------------------------------------------------------------------------
 # CONFIGURATION
 # -----------------------------------------------------------------------------
 BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "8477592504:AAGjyhk0EPH4TTZ6pAb3o7M6obgTA15V5Z4")
-ADMIN_ID = 7798227927  # የአድሚን ቴሌግራም ID
+ADMIN_ID = 7798227927  # Admin Telegram ID
 
 DEFAULT_RATE = 189.0  # 1 USDT = 189 ETB
 
-# የክፍያ ስልክ ቁጥር እና ስም (Telebirr ብቻ)
 PAYMENT_NUMBER = "0900253321"
 ADMIN_NAME = "Bereket"
 ADMIN_WALLET_ADDRESS = "TMAbfELuLH7gGyjp6YgUV1WWpPYwhaE27V"
@@ -39,20 +45,19 @@ ADMIN_WALLET_ADDRESS = "TMAbfELuLH7gGyjp6YgUV1WWpPYwhaE27V"
 MIN_USD = 20.0
 MAX_USD = 600.0
 
-ORDER_TIMEOUT_SECONDS = 30 * 60  # 30 ደቂቃ
+ORDER_TIMEOUT_SECONDS = 30 * 60  # 30 minutes
 
 (
     LANG,
     TRADE_TYPE,
     AMOUNT,
-    BUY_PAYMENT_CHOICE,
     PAYMENT_CHOICE,
     SCREENSHOT,
     WALLET_ADDRESS,
     SELL_SCREENSHOT,
     SELL_TELEBIRR,
     SUPPORT_MSG,
-) = range(10)
+) = range(9)
 
 DB_FILE = "bot_data.db"
 
@@ -129,24 +134,46 @@ def record_order(user_id: int, trade_type: str, amount_usd: float, total_birr: f
     except Exception as e:
         logger.error(f"Error recording order: {e}")
 
+async def verify_screenshot_ai(photo_bytes: bytes, expected_amount: float) -> tuple[bool, str]:
+    try:
+        image = Image.open(io.BytesIO(photo_bytes))
+        image_np = np.array(image)
+        results = ocr_reader.readtext(image_np)
+        
+        extracted_text = " ".join([text for (_, text, _) in results])
+        logger.info(f"AI Extracted Text: {extracted_text}")
+
+        formatted_amount_1 = f"{expected_amount:.2f}"
+        formatted_amount_2 = f"{int(expected_amount)}" if expected_amount.is_integer() else f"{expected_amount:.2f}"
+
+        if formatted_amount_1 in extracted_text or formatted_amount_2 in extracted_text:
+            return True, "✅ **AI Audit:** Amount verified successfully!"
+        else:
+            return False, "⚠️ **AI Warning:** Amount not clearly detected. Please check manually!"
+    except Exception as e:
+        logger.error(f"AI Verification Error: {e}")
+        return False, "⚠️ **AI Warning:** Could not read image. Please check manually."
+
 PERMANENT_KEYBOARD = ReplyKeyboardMarkup(
-    [[KeyboardButton("🔄 ዋና ሜኑ (Main Menu}")]],
+    [[KeyboardButton("🔄 Main Menu / ቋንቋ መቀየሪያ / Beddali / Menu")]],
     resize_keyboard=True
 )
 
 TEXTS = {
     'am': {
         'welcome': (
-            "☕ <b>ቡና ቦነስ OFFICIAL P2P MARKET</b> ☕\n"
+            "💎 <b>OFFICIAL USDT P2P MARKET</b> 💎\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "👋 <b>እንኳን ወደ ቡና ቦነስ P2P ገበያ ቦት በሰላም መጡ!</b>\n\n"
+            "✨ <b>እንኳን ወደ ፈጣን እና ደህንነቱ የተጠበቀ የ USDT P2P ገበያ በሰላም መጡ!</b>\n\n"
             "📊 <b>የዛሬው የምንዛሬ ተመን፦</b>\n"
             "└ <code>1 USDT = {rate:,.2f} ETB</code>\n\n"
             "💳 <b>የክፍያ መንገድ:</b> <code>Telebirr</code>\n"
-            "⚡ <i>ፈጣን፣ አስተማማኝ እና ሙሉ ደህንነቱ የተጠበቀ አገልግሎት!</i>\n"
+            "⚡ <i>ፈጣን ክፍያ እና አስተማማኝ P2P ግብይት!</i>\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "👇 <b>እባክዎን ማድረግ የሚፈልጉትን ይምረጡ፦</b>"
+            "👇 <b>እባክዎን የሚፈልጉትን አማራጭ ይምረጡ፦</b>"
         ),
+        'buy_btn': "🟢 USDT መግዛት (Buy)",
+        'sell_btn': "🔴 USDT መሸጥ (Sell)",
         'enter_amount_buy': (
             "🟢 <b>የግዢ መጠን ያስገቡ (BUY USDT)</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -163,64 +190,297 @@ TEXTS = {
             "└ <b>ከፍተኛ:</b> <code>{max:,.2f} USDT</code>\n\n"
             "✍️ <i>መሸጥ የሚፈልጉትን የ USDT መጠን በቁጥር ብቻ ያስገቡ፦</i>"
         ),
-        'invalid_num': "⚠️ <b>የተሳሳተ ቁጥር!</b>\nእባክዎን ከ <b>{min:,.2f}</b> እስከ <b>{max:,.2f} USDT</b> ባለው የቀን ወሰን ውስጥ ብቻ ያስገቡ፦",
+        'invalid_num': "⚠️ <b>የተሳሳተ ቁጥር!</b>\nእባክዎን ከ <b>{min:,.2f}</b> እስከ <b>{max:,.2f} USDT</b> ባለው ወሰን ውስጥ ያስገቡ፦",
         'summary_buy': (
-            "🧾 <b>የግዢ ትዕዛዝ ማጠቃለያ (BUY RECEIPT)</b>\n"
+            "🧾 <b>የግዢ ማጠቃለያ</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "💎 <b>የሚገዙት መጠን:</b> <code>{usd:,.2f} USDT</code>\n"
-            "📈 <b>የምንዛሬ ተመን:</b> <code>{rate:,.2f} ETB</code>\n"
-            "💰 <b>ጠቅላላ የሚከፍሉት:</b> <code>{birr:,.2f} ETB</code>\n"
-            "📱 <b>የክፍያ መንገድ:</b> <code>Telebirr</code>\n"
+            "💎 <b>መጠን:</b> <code>{usd:,.2f} USDT</code>\n"
+            "📈 <b>ተመን:</b> <code>{rate:,.2f} ETB</code>\n"
+            "💰 <b>ጠቅላላ ክፍያ:</b> <code>{birr:,.2f} ETB</code>\n"
+            "📱 <b>ክፍያ:</b> <code>Telebirr</code>\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "ለማረጋገጥና ወደ ክፍያ ለመሄድ ከታች ያለውን አዝራር ይጫኑ፦"
+            "ለማረጋገጥ ከታች ያለውን ይጫኑ፦"
         ),
         'summary_sell': (
-            "🧾 <b>የመሸጫ ትዕዛዝ ማጠቃለያ (SELL RECEIPT)</b>\n"
+            "🧾 <b>የመሸጫ ማጠቃለያ</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "💎 <b>የሚሸጡት መጠን:</b> <code>{usd:,.2f} USDT</code>\n"
-            "📈 <b>የምንዛሬ ተመን:</b> <code>{rate:,.2f} ETB</code>\n"
-            "💰 <b>ጠቅላላ የሚቀበሉት:</b> <code>{birr:,.2f} ETB</code>\n"
-            "📱 <b>የክፍያ መንገድ:</b> <code>Telebirr</code>\n"
+            "💎 <b>መጠን:</b> <code>{usd:,.2f} USDT</code>\n"
+            "📈 <b>ተመን:</b> <code>{rate:,.2f} ETB</code>\n"
+            "💰 <b>የሚቀበሉት:</b> <code>{birr:,.2f} ETB</code>\n"
+            "📱 <b>ክፍያ:</b> <code>Telebirr</code>\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "ለማረጋገጥና ወደ ክፍያ ለመሄድ ከታች ያለውን አዝራር ይጫኑ፦"
+            "ለማረጋገጥ ከታች ያለውን ይጫኑ፦"
         ),
         'pay_instruct_buy': (
             "⏳ <b>የ 30 ደቂቃ ቆጠራ ጀምሯል!</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
             "📱 <b>የክፍያ መንገድ:</b> <code>Telebirr</code>\n"
-            "👉 <b>የአድሚን ቴሌብር ቁጥር:</b> <code>{num}</code>\n"
+            "👉 <b>ቁጥር:</b> <code>{num}</code>\n"
             "👤 <b>ስም:</b> <code>{name}</code>\n\n"
             "💵 <b>የሚከፍሉት ትክክለኛ መጠን:</b> <code>{birr:,.2f} ETB</code>\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "⚠️ <i>በ 30 ደቂቃ ውስጥ ካልከፈሉ ይህ ትዕዛዝ ይሰረዛል።</i>\n"
-            "ክፍያውን እንደፈጸሙ የደረሰኙን <b>Screenshot (ፎቶ)</b> እዚህ ይላኩ፦"
+            "⚠️ <i>በ 30 ደቂቃ ውስጥ ካልከፈሉ ትዕዛዙ ይሰረዛል።</i>\n"
+            "ክፍያውን ፈጸመው <b>Screenshot (ፎቶ)</b> እዚህ ይላኩ፦"
         ),
         'pay_instruct_sell': (
             "⏳ <b>የ 30 ደቂቃ ቆጠራ ጀምሯል!</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
             "🌐 <b>TRC20 Wallet Address:</b> <code>{wallet}</code>\n"
-            "💎 <b>የሚልኩት ትክክለኛ መጠን:</b> <code>{usd:,.2f} USDT</code>\n"
+            "💎 <b>የሚልኩት መጠን:</b> <code>{usd:,.2f} USDT</code>\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "⚠️ <i>በ 30 ደቂቃ ውስጥ ካልላኩ ይህ ትዕዛዝ ይሰረዛል።</i>\n"
-            "ከተላከ በኋላ የመላኪያውን <b>Screenshot (ፎቶ)</b> እዚህ ይላኩ፦"
+            "⚠️ <i>በ 30 ደቂቃ ውስጥ ካልላኩ ትዕዛዙ ይሰረዛል።</i>\n"
+            "ከተላከ በኋላ <b>Screenshot (ፎቶ)</b> እዚህ ይላኩ፦"
         ),
-        'got_ss_buy': "✅ <b>ደረሰኝዎ ደርሶናል!</b>\n\n🎯 አሁን USDT ገቢ የሚደረግበትን የ <b>TRC20 Wallet Address ወይም Binance Pay ID</b> ጽፈው ይላኩልን፦",
-        'got_ss_sell': "✅ <b>ደረሰኝዎ ደርሶናል!</b>\n\n📱 አሁን ብር ገቢ የሚደረግበትን የ <b>Telebirr ስልክ ቁጥር እና ሙሉ ስም</b> ጽፈው ይላኩልን፦",
-        'complete': (
-            "🎉 <b>ትዕዛዝዎ በስኬት ተላኳል!</b>\n"
-            "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "⏳ አድሚኖቻችን መረጃዎን በማረጋገጥ ላይ ናቸው። እንደተጠናቀቀ መልእክትና ማረጋገጫ ይደርስዎታል።\n"
-            "እናመሰግናለን!"
-        ),
-        'support_prompt': "💬 <b>እገዛና ጥያቄ መስመር</b>\n━━━━━━━━━━━━━━━━━━━━━━\nያልገባዎትን ነገር፣ ጥያቄዎን ወይም አስተያየትዎን እዚህ ጽፈው ይላኩልን። አድሚኖቻችን በፍጥነት ይመልሱልዎታል።",
-        'support_sent': "✅ መልእክትዎ ለአድሚን ተልኳል! በአጭር ጊዜ ውስጥ መልስ ይደርስዎታል።",
+        'got_ss_buy': "✅ <b>ደረሰኝዎ ደርሶናል! AI በማረጋገጥ ላይ ነው...</b>\n\n🎯 አሁን USDT ገቢ የሚደረግበትን <b>TRC20 Address ወይም Binance Pay ID</b> ይላኩልን፦",
+        'got_ss_sell': "✅ <b>ደረሰኝዎ ደርሶናል! AI በማረጋገጥ ላይ ነው...</b>\n\n📱 አሁን ብር ገቢ የሚደረግበትን <b>Telebirr ቁጥር እና ስም</b> ይላኩልን፦",
+        'complete': "🎉 <b>ትዕዛዝዎ በስኬት ተልኳል!</b>\n━━━━━━━━━━━━━━━━━━━━━━\n⏳ አድሚን በማረጋገጥ ላይ ነው። እናመሰግናለን!",
+        'support_prompt': "💬 <b>እገዛ ማዕከል</b>\n━━━━━━━━━━━━━━━━━━━━━━\nጥያቄዎን ወይም አስተያየትዎን እዚህ ይጻፉ።",
+        'support_sent': "✅ መልእክትዎ ለአድሚን ተልኳል!",
         'btn_cancel': "❌ ሰርዝ (Cancel)",
-        'btn_support': "💬 እገዛና ጥያቄ (Support)"
+        'btn_support': "💬 እገዛ (Support)"
+    },
+    'om': {
+        'welcome': (
+            "💎 <b>OFFICIAL USDT P2P MARKET</b> 💎\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "✨ <b>Gara gabaa USDT P2P saffisaa fi amanamaa ta'etti nagaan dhuftan!</b>\n\n"
+            "📊 <b>Gatii Jijjiirraa Har'aa፦</b>\n"
+            "└ <code>1 USDT = {rate:,.2f} ETB</code>\n\n"
+            "💳 <b>Karaa Kaffaltii:</b> <code>Telebirr</code>\n"
+            "⚡ <i>Kaffaltii saffisaa fi daldala P2P amanamaa!</i>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "👇 <b>Maaloo filannoo barbaaddan filadhaa፦</b>"
+        ),
+        'buy_btn': "🟢 USDT Bitachuu (Buy)",
+        'sell_btn': "🔴 USDT Gurguruu (Sell)",
+        'enter_amount_buy': (
+            "🟢 <b>Hanga Bitachuu Barbaaddan Galchaa (BUY USDT)</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "📌 <b>Daangaa Guyyaa፦</b>\n"
+            "├ <b>Xiqqaa:</b> <code>{min:,.2f} USDT</code>\n"
+            "└ <b>Guddaa:</b> <code>{max:,.2f} USDT</code>\n\n"
+            "✍️ <i>Hanga bitachuu barbaaddan lakkoofsaan qofa galchaa፦</i>"
+        ),
+        'enter_amount_sell': (
+            "🔴 <b>Hanga Gurguruu Barbaaddan Galchaa (SELL USDT)</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "📌 <b>Daangaa Guyyaa፦</b>\n"
+            "├ <b>Xiqqaa:</b> <code>{min:,.2f} USDT</code>\n"
+            "└ <b>Guddaa:</b> <code>{max:,.2f} USDT</code>\n\n"
+            "✍️ <i>Hanga gurguruu barbaaddan lakkoofsaan qofa galchaa፦</i>"
+        ),
+        'invalid_num': "⚠️ <b>Lakkoofsa Dogoggoraa!</b>\nMaaloo <b>{min:,.2f}</b> hanga <b>{max:,.2f} USDT</b> jidduutti galchaa፦",
+        'summary_buy': (
+            "🧾 <b>Cuunfaa Bittaa</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "💎 <b>Hanga:</b> <code>{usd:,.2f} USDT</code>\n"
+            "📈 <b>Gatii:</b> <code>{rate:,.2f} ETB</code>\n"
+            "💰 <b>Waliigala Kaffaltii:</b> <code>{birr:,.2f} ETB</code>\n"
+            "📱 <b>Kaffaltii:</b> <code>Telebirr</code>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "Mirkaneessuuf cuqaasaa:"
+        ),
+        'summary_sell': (
+            "🧾 <b>Cuunfaa Gurgurtaaa</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "💎 <b>Hanga:</b> <code>{usd:,.2f} USDT</code>\n"
+            "📈 <b>Gatii:</b> <code>{rate:,.2f} ETB</code>\n"
+            "💰 <b>Waliigala Fudhattan:</b> <code>{birr:,.2f} ETB</code>\n"
+            "📱 <b>Kaffaltii:</b> <code>Telebirr</code>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "Mirkaneessuuf cuqaasaa:"
+        ),
+        'pay_instruct_buy': (
+            "⏳ <b>Yeroon Daqiiqaa 30 Jalqabeera!</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "📱 <b>Kaffaltii:</b> <code>Telebirr</code>\n"
+            "👉 <b>Lakkoofsa Admin:</b> <code>{num}</code>\n"
+            "👤 <b>Maqaa:</b> <code>{name}</code>\n\n"
+            "💵 <b>Hanga Kaffaltii:</b> <code>{birr:,.2f} ETB</code>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "⚠️ <i>Daqiiqaa 30 keessatti yoo kaffaltii hin raawwatin ajajni ni haqama.</i>\n"
+            "Kaffaltii raawwattanii <b>Screenshot (Suuraa)</b> asitti ergaa:"
+        ),
+        'pay_instruct_sell': (
+            "⏳ <b>Yeroon Daqiiqaa 30 Jalqabeera!</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "🌐 <b>TRC20 Wallet Address:</b> <code>{wallet}</code>\n"
+            "💎 <b>Hanga Ergitan:</b> <code>{usd:,.2f} USDT</code>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "⚠️ <i>Daqiiqaa 30 keessatti yoo hin ergine ajajni ni haqama.</i>\n"
+            "Ergitan booda <b>Screenshot (Suuraa)</b> asitti ergaa:"
+        ),
+        'got_ss_buy': "✅ <b>Nagaheen keessan nu gaheera! AI mirkaneessaa jira...</b>\n\n🎯 Amma <b>TRC20 Address ykn Binance Pay ID</b> keessan ergaa:",
+        'got_ss_sell': "✅ <b>Nagaheen keessan nu gaheera! AI mirkaneessaa jira...</b>\n\n📱 Amma <b>Lakkoofsa Telebirr fi Maqaa</b> keessan ergaa:",
+        'complete': "🎉 <b>Ajajni keessan milkaa'inaan ergameera!</b>\n━━━━━━━━━━━━━━━━━━━━━━\n⏳ Admin ni mirkaneessa. Galatoomaa!",
+        'support_prompt': "💬 <b>Giddugala Deeggarsa</b>\n━━━━━━━━━━━━━━━━━━━━━━\nGaaffii keessan asitti barreessaa.",
+        'support_sent': "✅ Ergaan keessan Adminif ergameera!",
+        'btn_cancel': "❌ Haqi (Cancel)",
+        'btn_support': "💬 Deeggarsa (Support)"
+    },
+    'en': {
+        'welcome': (
+            "💎 <b>OFFICIAL USDT P2P MARKET</b> 💎\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "✨ <b>Welcome to the fast and secure USDT P2P Market!</b>\n\n"
+            "📊 <b>Today's Exchange Rate:</b>\n"
+            "└ <code>1 USDT = {rate:,.2f} ETB</code>\n\n"
+            "💳 <b>Payment Method:</b> <code>Telebirr</code>\n"
+            "⚡ <i>Fast payment and secure P2P trading!</i>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "👇 <b>Please select your preferred option:</b>"
+        ),
+        'buy_btn': "🟢 Buy USDT",
+        'sell_btn': "🔴 Sell USDT",
+        'enter_amount_buy': (
+            "🟢 <b>Enter Amount to Buy (BUY USDT)</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "📌 <b>Daily Limits:</b>\n"
+            "├ <b>Min:</b> <code>{min:,.2f} USDT</code>\n"
+            "└ <b>Max:</b> <code>{max:,.2f} USDT</code>\n\n"
+            "✍️ <i>Enter amount in numbers only:</i>"
+        ),
+        'enter_amount_sell': (
+            "🔴 <b>Enter Amount to Sell (SELL USDT)</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "📌 <b>Daily Limits:</b>\n"
+            "├ <b>Min:</b> <code>{min:,.2f} USDT</code>\n"
+            "└ <b>Max:</b> <code>{max:,.2f} USDT</code>\n\n"
+            "✍️ <i>Enter amount in numbers only:</i>"
+        ),
+        'invalid_num': "⚠️ <b>Invalid Amount!</b>\nPlease enter between <b>{min:,.2f}</b> and <b>{max:,.2f} USDT</b>:",
+        'summary_buy': (
+            "🧾 <b>Buy Summary</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "💎 <b>Amount:</b> <code>{usd:,.2f} USDT</code>\n"
+            "📈 <b>Rate:</b> <code>{rate:,.2f} ETB</code>\n"
+            "💰 <b>Total Payable:</b> <code>{birr:,.2f} ETB</code>\n"
+            "📱 <b>Payment:</b> <code>Telebirr</code>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "Click below to proceed:"
+        ),
+        'summary_sell': (
+            "🧾 <b>Sell Summary</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "💎 <b>Amount:</b> <code>{usd:,.2f} USDT</code>\n"
+            "📈 <b>Rate:</b> <code>{rate:,.2f} ETB</code>\n"
+            "💰 <b>Total Receivable:</b> <code>{birr:,.2f} ETB</code>\n"
+            "📱 <b>Payment:</b> <code>Telebirr</code>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "Click below to proceed:"
+        ),
+        'pay_instruct_buy': (
+            "⏳ <b>30 Minutes Timer Started!</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "📱 <b>Payment Method:</b> <code>Telebirr</code>\n"
+            "👉 <b>Admin Number:</b> <code>{num}</code>\n"
+            "👤 <b>Name:</b> <code>{name}</code>\n\n"
+            "💵 <b>Exact Amount to Pay:</b> <code>{birr:,.2f} ETB</code>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "⚠️ <i>If payment is not sent within 30 mins, order will be cancelled.</i>\n"
+            "Send payment <b>Screenshot</b> here:"
+        ),
+        'pay_instruct_sell': (
+            "⏳ <b>30 Minutes Timer Started!</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "🌐 <b>TRC20 Wallet Address:</b> <code>{wallet}</code>\n"
+            "💎 <b>Exact Amount to Send:</b> <code>{usd:,.2f} USDT</code>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "⚠️ <i>If USDT is not sent within 30 mins, order will be cancelled.</i>\n"
+            "Send transfer <b>Screenshot</b> here:"
+        ),
+        'got_ss_buy': "✅ <b>Screenshot received! AI is auditing...</b>\n\n🎯 Now reply with your <b>TRC20 Address or Binance Pay ID</b>:",
+        'got_ss_sell': "✅ <b>Screenshot received! AI is auditing...</b>\n\n📱 Now reply with your <b>Telebirr Number and Name</b>:",
+        'complete': "🎉 <b>Order submitted successfully!</b>\n━━━━━━━━━━━━━━━━━━━━━━\n⏳ Admin is verifying. Thank you!",
+        'support_prompt': "💬 <b>Help & Support</b>\n━━━━━━━━━━━━━━━━━━━━━━\nPlease type your message below.",
+        'support_sent': "✅ Your message has been sent to Admin!",
+        'btn_cancel': "❌ Cancel",
+        'btn_support': "💬 Support"
+    },
+    'so': {
+        'welcome': (
+            "💎 <b>OFFICIAL USDT P2P MARKET</b> 💎\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "✨ <b>Ku soo dhowow suuqa USDT P2P ee degdega ah oo ammaan ah!</b>\n\n"
+            "📊 <b>Qiimaha Sarifka Maanta፦</b>\n"
+            "└ <code>1 USDT = {rate:,.2f} ETB</code>\n\n"
+            "💳 <b>Habka Bixinta:</b> <code>Telebirr</code>\n"
+            "⚡ <i>Bixin degdeg ah iyo ganacsi P2P lagu kalsoonaan karo!</i>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "👇 <b>Fadlan dooro adeegga aad rabto፦</b>"
+        ),
+        'buy_btn': "🟢 Iibso USDT (Buy)",
+        'sell_btn': "🔴 Iibi USDT (Sell)",
+        'enter_amount_buy': (
+            "🟢 <b>Gali inta aad iibsanirabto (BUY USDT)</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "📌 <b>Xadka Maalinlaha ah፦</b>\n"
+            "├ <b>Ugu Yaraan:</b> <code>{min:,.2f} USDT</code>\n"
+            "└ <b>Ugu Badnaan:</b> <code>{max:,.2f} USDT</code>\n\n"
+            "✍️ <i>Gali qadarka nambar keliya ahaan፦</i>"
+        ),
+        'enter_amount_sell': (
+            "🔴 <b>Gali inta aad iibin rabto (SELL USDT)</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "📌 <b>Xadka Maalinlaha ah፦</b>\n"
+            "├ <b>Ugu Yaraan:</b> <code>{min:,.2f} USDT</code>\n"
+            "└ <b>Ugu Badnaan:</b> <code>{max:,.2f} USDT</code>\n\n"
+            "✍️ <i>Gali qadarka nambar keliya ahaan፦</i>"
+        ),
+        'invalid_num': "⚠️ <b>Nambar khaldan!</b>\nFadlan gali int u dhaxeysa <b>{min:,.2f}</b> iyo <b>{max:,.2f} USDT</b>:",
+        'summary_buy': (
+            "🧾 <b>Koobitaanka Iibsiga</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "💎 <b>Qadarka:</b> <code>{usd:,.2f} USDT</code>\n"
+            "📈 <b>Sarifka:</b> <code>{rate:,.2f} ETB</code>\n"
+            "💰 <b>Wadarta Lacagta:</b> <code>{birr:,.2f} ETB</code>\n"
+            "📱 <b>Lacag Bixinta:</b> <code>Telebirr</code>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "Riix hoos si aad u sii waddo:"
+        ),
+        'summary_sell': (
+            "🧾 <b>Koobitaanka Iibinta</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "💎 <b>Qadarka:</b> <code>{usd:,.2f} USDT</code>\n"
+            "📈 <b>Sarifka:</b> <code>{rate:,.2f} ETB</code>\n"
+            "💰 <b>Wadarta aad heleysid:</b> <code>{birr:,.2f} ETB</code>\n"
+            "📱 <b>Lacag Bixinta:</b> <code>Telebirr</code>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "Riix hoos si aad u sii waddo:"
+        ),
+        'pay_instruct_buy': (
+            "⏳ <b>Waqtiga 30 daqiiqo waa bilowday!</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "📱 <b>Habka Bixinta:</b> <code>Telebirr</code>\n"
+            "👉 <b>Nambarka Admin:</b> <code>{num}</code>\n"
+            "👤 <b>Magaca:</b> <code>{name}</code>\n\n"
+            "💵 <b>Lacagta saxda ah:</b> <code>{birr:,.2f} ETB</code>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "⚠️ <i>Haddii aadan 30 daqiiqo gudahood ku bixin, dalabku wuu baaqanayaa.</i>\n"
+            "Sawirka rasiidka <b>(Screenshot)</b> halkan soo dir:"
+        ),
+        'pay_instruct_sell': (
+            "⏳ <b>Waqtiga 30 daqiiqo waa bilowday!</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "🌐 <b>TRC20 Wallet Address:</b> <code>{wallet}</code>\n"
+            "💎 <b>Qadarka aad direysid:</b> <code>{usd:,.2f} USDT</code>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "⚠️ <i>Haddii aadan 30 daqiiqo gudahood dirin, dalabku wuu baaqanayaa.</i>\n"
+            "Dirista kadib sawirka <b>(Screenshot)</b> halkan soo dir:"
+        ),
+        'got_ss_buy': "✅ <b>Rasiidkii waa la helay! AI ayaa xaqiijinaya...</b>\n\n🎯 Hadda soo dir <b>TRC20 Address ama Binance Pay ID</b>:",
+        'got_ss_sell': "✅ <b>Rasiidkii waa la helay! AI ayaa xaqiijinaya...</b>\n\n📱 Hadda soo dir <b>Nambarkaaga Telebirr iyo Magacaaga</b>:",
+        'complete': "🎉 <b>Dalabkaaga si guul leh ayaa loo diray!</b>\n━━━━━━━━━━━━━━━━━━━━━━\n⏳ Admin ayaa hubinaya. Waad mahadsan tahay!",
+        'support_prompt': "💬 <b>Xarunta Caawimada</b>\n━━━━━━━━━━━━━━━━━━━━━━\nFadlan halkaan ku qor su'aashaada.",
+        'support_sent': "✅ Farriintaadii waxaa loo diray Admin!",
+        'btn_cancel': "❌ Jooji (Cancel)",
+        'btn_support': "💬 Caawimo (Support)"
     }
 }
 
 def get_txt(context: ContextTypes.DEFAULT_TYPE) -> dict:
-    return TEXTS['am']
+    lang = context.user_data.get('lang', 'am')
+    return TEXTS.get(lang, TEXTS['am'])
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.clear()
@@ -228,17 +488,43 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if user:
         record_user(user.id, user.username or "NoUsername")
 
-    txt = get_txt(context)
-    rate = db_get_rate()
-    
     keyboard = [
-        [InlineKeyboardButton("🟢 USDT መግዛት (Buy)", callback_data="trade_buy"), InlineKeyboardButton("🔴 USDT መሸጥ (Sell)", callback_data="trade_sell")],
-        [InlineKeyboardButton(txt['btn_support'], callback_data="bot_support")]
+        [
+            InlineKeyboardButton("🇪🇹 Amharic", callback_data="lang_am"),
+            InlineKeyboardButton("🇪🇹 Afaan Oromoo", callback_data="lang_om")
+        ],
+        [
+            InlineKeyboardButton("🇬🇧 English", callback_data="lang_en"),
+            InlineKeyboardButton("🇸🇴 Somali", callback_data="lang_so")
+        ]
     ]
-    
     if update.message:
-        await update.message.reply_text(txt['welcome'].format(rate=rate), reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
-        await update.message.reply_text("💡 <i>ዋና ሜኑ</i>", reply_markup=PERMANENT_KEYBOARD, parse_mode="HTML")
+        await update.message.reply_text(
+            "🌐 <b>Select Language / ቋንቋ ይምረጡ / Lugha Filadhaa / Dooro Luqadda:</b>",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            parse_mode="HTML"
+        )
+        await update.message.reply_text(
+            "💡 <i>Main Menu / ቋንቋ መቀየሪያ</i>",
+            reply_markup=PERMANENT_KEYBOARD,
+            parse_mode="HTML"
+        )
+    return LANG
+
+async def select_language(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    query = update.callback_query
+    if query:
+        await query.answer()
+        lang_code = query.data.split("_")[1]
+        context.user_data['lang'] = lang_code
+        txt = get_txt(context)
+        rate = db_get_rate()
+        
+        keyboard = [
+            [InlineKeyboardButton(txt['buy_btn'], callback_data="trade_buy"), InlineKeyboardButton(txt['sell_btn'], callback_data="trade_sell")],
+            [InlineKeyboardButton(txt['btn_support'], callback_data="bot_support")]
+        ]
+        await query.message.edit_text(txt['welcome'].format(rate=rate), reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
     return TRADE_TYPE
 
 async def select_trade_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -258,6 +544,25 @@ async def select_trade_type(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await query.message.edit_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
     return AMOUNT
 
+async def handle_support_msg(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if update.message and update.message.text:
+        user = update.effective_user
+        txt = get_txt(context)
+        if user:
+            admin_msg = (
+                f"📩 <b>NEW SUPPORT MESSAGE!</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"👤 <b>From:</b> @{user.username} (<code>{user.id}</code>)\n"
+                f"📝 <b>Message:</b> {update.message.text}\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━"
+            )
+            admin_btn = [[InlineKeyboardButton("💬 Reply to User", callback_data=f"reply_{user.id}")] ]
+            await context.bot.send_message(chat_id=ADMIN_ID, text=admin_msg, reply_markup=InlineKeyboardMarkup(admin_btn), parse_mode="HTML")
+        await update.message.reply_text(txt['support_sent'], parse_mode="HTML")
+        context.user_data.clear()
+        return ConversationHandler.END
+    return SUPPORT_MSG
+
 async def get_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     txt = get_txt(context)
     if not update.message or not update.message.text:
@@ -275,7 +580,7 @@ async def get_amount(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
         trade_type = context.user_data.get('trade_type', 'buy')
 
         keyboard = [
-            [InlineKeyboardButton("አረጋግጥና ቀጥል ➡️", callback_data="proceed_pay")],
+            [InlineKeyboardButton("✅ Proceed / አረጋግጥ", callback_data="proceed_pay")],
             [InlineKeyboardButton(txt['btn_cancel'], callback_data="user_cancel")]
         ]
         
@@ -316,6 +621,14 @@ async def receive_screenshot(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if update.message and update.message.photo:
         photo = update.message.photo[-1]
         context.user_data['photo_file'] = photo.file_id
+        
+        photo_file_obj = await context.bot.get_file(photo.file_id)
+        photo_bytes = await photo_file_obj.download_as_bytearray()
+        
+        expected_birr = context.user_data.get('total_birr', 0.0)
+        _, ai_status_text = await verify_screenshot_ai(photo_bytes, expected_birr)
+        context.user_data['ai_status'] = ai_status_text
+
         await update.message.reply_text(txt['got_ss_buy'], parse_mode="HTML")
         return WALLET_ADDRESS
     return SCREENSHOT
@@ -325,6 +638,14 @@ async def receive_sell_screenshot(update: Update, context: ContextTypes.DEFAULT_
     if update.message and update.message.photo:
         photo = update.message.photo[-1]
         context.user_data['photo_file'] = photo.file_id
+        
+        photo_file_obj = await context.bot.get_file(photo.file_id)
+        photo_bytes = await photo_file_obj.download_as_bytearray()
+        
+        expected_usd = context.user_data.get('usd_amount', 0.0)
+        _, ai_status_text = await verify_screenshot_ai(photo_bytes, expected_usd)
+        context.user_data['ai_status'] = ai_status_text
+
         await update.message.reply_text(txt['got_ss_sell'], parse_mode="HTML")
         return SELL_TELEBIRR
     return SELL_SCREENSHOT
@@ -336,21 +657,27 @@ async def receive_wallet(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         user = update.effective_user
         usd = context.user_data.get('usd_amount', 0)
         birr = context.user_data.get('total_birr', 0)
+        ai_status = context.user_data.get('ai_status', 'No AI Audit Data')
 
         if user:
             record_order(user.id, "BUY", usd, birr)
 
             admin_msg = (
-                f"🚨 <b>አዲስ የግዢ ትዕዛዝ ደርሶናል!</b>\n"
+                f"🚨 <b>NEW BUY ORDER RECEIVED!</b>\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"👤 <b>ተጠቃሚ:</b> @{user.username} (<code>{user.id}</code>)\n"
-                f"💎 <b>መጠን:</b> <code>{usd:,.2f} USDT</code>\n"
-                f"💰 <b>ጠቅላላ ብር:</b> <code>{birr:,.2f} ETB</code>\n"
-                f"📱 <b>የክፍያ መንገድ:</b> <code>Telebirr</code>\n"
-                f"📍 <b>የተጠቃሚ ኪስ/አድራሻ:</b> <code>{wallet}</code>"
+                f"👤 <b>User:</b> @{user.username} (<code>{user.id}</code>)\n"
+                f"💎 <b>Amount:</b> <code>{usd:,.2f} USDT</code>\n"
+                f"💰 <b>Total Birr:</b> <code>{birr:,.2f} ETB</code>\n"
+                f"📱 <b>Payment Method:</b> <code>Telebirr</code>\n"
+                f"📍 <b>Payout Wallet:</b> <code>{wallet}</code>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"🤖 <b>AI Audit Report:</b>\n{ai_status}\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━"
             )
             admin_btn = [
-                [InlineKeyboardButton("✅ አረጋግጥ (Approve)", callback_data=f"approve_{user.id}"), InlineKeyboardButton("❌ ውድቅ አድርግ (Reject)", callback_data=f"reject_{user.id}")]
+                [InlineKeyboardButton("📸 Send Payment Proof", callback_data=f"proof_{user.id}")],
+                [InlineKeyboardButton("✅ Quick Approve", callback_data=f"approve_{user.id}"), InlineKeyboardButton("❌ Reject", callback_data=f"reject_{user.id}")],
+                [InlineKeyboardButton("💬 Message User", callback_data=f"reply_{user.id}")]
             ]
             await context.bot.send_photo(chat_id=ADMIN_ID, photo=context.user_data['photo_file'], caption=admin_msg, reply_markup=InlineKeyboardMarkup(admin_btn), parse_mode="HTML")
         await update.message.reply_text(txt['complete'], parse_mode="HTML")
@@ -365,20 +692,26 @@ async def receive_sell_telebirr(update: Update, context: ContextTypes.DEFAULT_TY
         user = update.effective_user
         usd = context.user_data.get('usd_amount', 0)
         birr = context.user_data.get('total_birr', 0)
+        ai_status = context.user_data.get('ai_status', 'No AI Audit Data')
 
         if user:
             record_order(user.id, "SELL", usd, birr)
 
             admin_msg = (
-                f"🚨 <b>አዲስ የመሸጫ ትዕዛዝ ደርሶናል!</b>\n"
+                f"🚨 <b>NEW SELL ORDER RECEIVED!</b>\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"👤 <b>ተጠቃሚ:</b> @{user.username} (<code>{user.id}</code>)\n"
-                f"💎 <b>መጠን:</b> <code>{usd:,.2f} USDT</code>\n"
-                f"💰 <b>ጠቅላላ ብር:</b> <code>{birr:,.2f} ETB</code>\n"
-                f"📱 <b>የመቀበያ Telebirr:</b> <code>{telebirr_info}</code>"
+                f"👤 <b>User:</b> @{user.username} (<code>{user.id}</code>)\n"
+                f"💎 <b>Amount:</b> <code>{usd:,.2f} USDT</code>\n"
+                f"💰 <b>Total Birr:</b> <code>{birr:,.2f} ETB</code>\n"
+                f"📱 <b>Payout Telebirr:</b> <code>{telebirr_info}</code>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"🤖 <b>AI Audit Report:</b>\n{ai_status}\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━"
             )
             admin_btn = [
-                [InlineKeyboardButton("✅ አረጋግጥ (Approve)", callback_data=f"approve_{user.id}"), InlineKeyboardButton("❌ ውድቅ አድርግ (Reject)", callback_data=f"reject_{user.id}")]
+                [InlineKeyboardButton("📸 Send Payment Proof", callback_data=f"proof_{user.id}")],
+                [InlineKeyboardButton("✅ Quick Approve", callback_data=f"approve_{user.id}"), InlineKeyboardButton("❌ Reject", callback_data=f"reject_{user.id}")],
+                [InlineKeyboardButton("💬 Message User", callback_data=f"reply_{user.id}")]
             ]
             await context.bot.send_photo(chat_id=ADMIN_ID, photo=context.user_data['photo_file'], caption=admin_msg, reply_markup=InlineKeyboardMarkup(admin_btn), parse_mode="HTML")
         await update.message.reply_text(txt['complete'], parse_mode="HTML")
@@ -394,50 +727,35 @@ async def admin_decision_handler(update: Update, context: ContextTypes.DEFAULT_T
         action = data[0]
         target_user_id = int(data[1])
 
-        if action == "approve":
-            await context.bot.send_message(chat_id=target_user_id, text="🎉 <b>ትዕዛዝዎ በአድሚን ተረጋግጦ ተጠናቋል!</b>", parse_mode="HTML")
+        if action == "proof":
+            context.bot_data['proof_target_id'] = target_user_id
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=f"📸 <b>Send payment proof screenshot for User ID <code>{target_user_id}</code>:</b>",
+                parse_mode="HTML"
+            )
+        elif action == "approve":
+            await context.bot.send_message(chat_id=target_user_id, text="🎉 <b>Your order has been successfully approved! Thank you!</b>", parse_mode="HTML")
             await query.edit_message_caption(caption=(query.message.caption or "") + "\n\n✅ <b>STATUS: APPROVED</b>", parse_mode="HTML")
         elif action == "reject":
-            await context.bot.send_message(chat_id=target_user_id, text="❌ <b>ትዕዛዝዎ አልፀደቀም።</b>", parse_mode="HTML")
+            await context.bot.send_message(chat_id=target_user_id, text="❌ <b>Your order has been rejected. Please contact support.</b>", parse_mode="HTML")
             await query.edit_message_caption(caption=(query.message.caption or "") + "\n\n❌ <b>STATUS: REJECTED</b>", parse_mode="HTML")
+        elif action == "reply":
+            context.bot_data['reply_target_id'] = target_user_id
+            await context.bot.send_message(
+                chat_id=ADMIN_ID,
+                text=f"✍️ <b>Type your message to User ID <code>{target_user_id}</code>:</b>",
+                parse_mode="HTML"
+            )
 
-async def cancel_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    if update.callback_query and update.callback_query.message:
-        await update.callback_query.answer()
-        await update.callback_query.message.edit_text("❌ <b>ትዕዛዙ ተሰርዟል።</b>\nእንደገና ለመጀመር /start ይበሉ።", parse_mode="HTML")
-    context.user_data.clear()
-    return ConversationHandler.END
-
-def main() -> None:
-    if not BOT_TOKEN:
-        logger.critical("TELEGRAM_BOT_TOKEN missing.")
+async def admin_media_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message or not update.message.from_user or update.message.from_user.id != ADMIN_ID:
         return
 
-    app = ApplicationBuilder().token(BOT_TOKEN).build()
-    restart_handler = MessageHandler(filters.Regex("^🔄 ዋና ሜኑ"), start)
-
-    conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("start", start), restart_handler],
-        states={
-            TRADE_TYPE: [CallbackQueryHandler(select_trade_type, pattern="^(trade_|bot_support)")],
-            AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~filters.Regex("^🔄 ዋና ሜኑ"), get_amount)],
-            PAYMENT_CHOICE: [CallbackQueryHandler(payment_selected, pattern="^proceed_pay$")],
-            SCREENSHOT: [MessageHandler(filters.PHOTO, receive_screenshot)],
-            WALLET_ADDRESS: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~filters.Regex("^🔄 ዋና ሜኑ"), receive_wallet)],
-            SELL_SCREENSHOT: [MessageHandler(filters.PHOTO, receive_sell_screenshot)],
-            SELL_TELEBIRR: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~filters.Regex("^🔄 ዋና ሜኑ"), receive_sell_telebirr)],
-        },
-        fallbacks=[
-            CallbackQueryHandler(cancel_button_handler, pattern="^user_cancel$"),
-            restart_handler,
-        ],
-    )
-
-    app.add_handler(conv_handler)
-    app.add_handler(CallbackQueryHandler(admin_decision_handler, pattern="^(approve_|reject_)"))
-
-    logger.info("Buna Bonus P2P Bot running...")
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
+    proof_target_id = context.bot_data.get('proof_target_id')
+    if proof_target_id and update.message.photo:
+        photo_id = update.message.photo[-1].file_id
+        caption_text = (
+            "🎉 <b>ORDER COMPLETED SUCCESSFULLY!</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━\n"
+            "🧾 <b>Payment Proof attached
