@@ -1,6 +1,1 @@
 python-telegram-bot
-numpy
-Pillow
-easyocr
-torch
-torchvision
