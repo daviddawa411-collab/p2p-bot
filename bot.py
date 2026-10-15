@@ -57,6 +57,9 @@ def init_db():
         cursor.execute("INSERT OR REPLACE INTO settings (key, value) VALUES ('rate', ?)", (DEFAULT_RATE,))
         cursor.execute("CREATE TABLE IF NOT EXISTS users (user_id INTEGER PRIMARY KEY, username TEXT)")
         cursor.execute("CREATE TABLE IF NOT EXISTS orders (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER, trade_type TEXT, amount_bonus REAL, total_birr REAL)")
+        
+        # 🧹 Railway ላይ Disk Space እንዳይሞላ አውቶማቲክ ጽዳት (Vacuum & Optimize)
+        cursor.execute("VACUUM;")
         conn.commit()
 
 init_db()
@@ -148,7 +151,7 @@ async def select_buy_payment(update: Update, context: ContextTypes.DEFAULT_TYPE)
     
     keyboard = [[InlineKeyboardButton("አረጋግጥና ቀጥል ➡️", callback_data="proceed_pay")]]
     msg = f"🧾 <b>የግዢ ማጠቃለያ</b>\n\n☕ ቦነስ መጠን: <code>{bonus:,.2f} Buna</code>\n💰 የሚከፍሉት: <code>{birr:,.2f} ETB</code>\n📱 የክፍያ መንገድ: <code>{method}</code>"
-    await query.message.edit_text(msg, parse_mode="HTML")
+    await query.message.edit_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
     return PAYMENT_CHOICE
 
 async def payment_selected(update: Update, context: ContextTypes.DEFAULT_TYPE):
