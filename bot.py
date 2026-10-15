@@ -758,4 +758,65 @@ async def admin_media_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         caption_text = (
             "🎉 <b>ORDER COMPLETED SUCCESSFULLY!</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "🧾 <b>Payment Proof attached
+            "🧾 <b>Payment Proof attached above.</b>\n"
+            "Thank you for trading with us! 🙏"
+        )
+        await context.bot.send_photo(chat_id=proof_target_id, photo=photo_id, caption=caption_text, parse_mode="HTML")
+        await update.message.reply_text(f"✅ Payment proof sent to User ID <code>{proof_target_id}</code>!", parse_mode="HTML")
+        context.bot_data.pop('proof_target_id', None)
+        return
+
+    reply_target_id = context.bot_data.get('reply_target_id')
+    if reply_target_id and update.message.text:
+        reply_text = update.message.text
+        await context.bot.send_message(
+            chat_id=reply_target_id,
+            text=f"💬 <b>Admin Message:</b>\n━━━━━━━━━━━━━━━━━━━━━━\n{reply_text}",
+            parse_mode="HTML"
+        )
+        await update.message.reply_text(f"✅ Message sent to User ID <code>{reply_target_id}</code>!", parse_mode="HTML")
+        context.bot_data.pop('reply_target_id', None)
+
+async def cancel_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    if update.callback_query and update.callback_query.message:
+        await update.callback_query.answer()
+        await update.callback_query.message.edit_text("❌ <b>Order cancelled. Send /start to restart.</b>", parse_mode="HTML")
+    context.user_data.clear()
+    return ConversationHandler.END
+
+def main() -> None:
+    if not BOT_TOKEN:
+        logger.critical("TELEGRAM_BOT_TOKEN missing.")
+        return
+
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+    restart_handler = MessageHandler(filters.Regex("^🔄 Main Menu"), start)
+
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("start", start), restart_handler],
+        states={
+            LANG: [CallbackQueryHandler(select_language, pattern="^lang_")],
+            TRADE_TYPE: [CallbackQueryHandler(select_trade_type, pattern="^(trade_|bot_support)")],
+            SUPPORT_MSG: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~filters.Regex("^🔄 Main Menu"), handle_support_msg)],
+            AMOUNT: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~filters.Regex("^🔄 Main Menu"), get_amount)],
+            PAYMENT_CHOICE: [CallbackQueryHandler(payment_selected, pattern="^proceed_pay$")],
+            SCREENSHOT: [MessageHandler(filters.PHOTO, receive_screenshot)],
+            WALLET_ADDRESS: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~filters.Regex("^🔄 Main Menu"), receive_wallet)],
+            SELL_SCREENSHOT: [MessageHandler(filters.PHOTO, receive_sell_screenshot)],
+            SELL_TELEBIRR: [MessageHandler(filters.TEXT & ~filters.COMMAND & ~filters.Regex("^🔄 Main Menu"), receive_sell_telebirr)],
+        },
+        fallbacks=[
+            CallbackQueryHandler(cancel_button_handler, pattern="^user_cancel$"),
+            restart_handler,
+        ],
+    )
+
+    app.add_handler(conv_handler)
+    app.add_handler(CallbackQueryHandler(admin_decision_handler, pattern="^(proof_|approve_|reject_|reply_)"))
+    app.add_handler(MessageHandler(filters.PHOTO | (filters.TEXT & ~filters.COMMAND), admin_media_handler))
+
+    logger.info("Buna Bonus P2P Bot running with Multilingual and Professional AI features...")
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
