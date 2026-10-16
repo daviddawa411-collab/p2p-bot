@@ -6,7 +6,7 @@ import numpy as np
 from PIL import Image
 import easyocr
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton, WebAppInfo
 from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
@@ -162,9 +162,9 @@ PERMANENT_KEYBOARD = ReplyKeyboardMarkup(
 TEXTS = {
     'am': {
         'welcome': (
-            "💎 <b>OFFICIAL USDT P2P MARKET</b> 💎\n"
+            "☕ <b>BUNA BONUS OFFICIAL P2P MARKET</b> ☕\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "✨ <b>እንኳን ወደ ፈጣን እና ደህንነቱ የተጠበቀ የ USDT P2P ገበያ በሰላም መጡ!</b>\n\n"
+            "👋 <b>እንኳን ወደ ቡና ቦነስ P2P ገበያ በሰላም መጡ!</b>\n\n"
             "📊 <b>የዛሬው የምንዛሬ ተመን፦</b>\n"
             "└ <code>1 USDT = {rate:,.2f} ETB</code>\n\n"
             "💳 <b>የክፍያ መንገድ:</b> <code>Telebirr</code>\n"
@@ -174,6 +174,7 @@ TEXTS = {
         ),
         'buy_btn': "🟢 USDT መግዛት (Buy)",
         'sell_btn': "🔴 USDT መሸጥ (Sell)",
+        'webapp_btn': "🚀 Buna Bonus Mini App ဖွင့်ရန်",
         'enter_amount_buy': (
             "🟢 <b>የግዢ መጠን ያስገቡ (BUY USDT)</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -241,9 +242,9 @@ TEXTS = {
     },
     'om': {
         'welcome': (
-            "💎 <b>OFFICIAL USDT P2P MARKET</b> 💎\n"
+            "☕ <b>BUNA BONUS OFFICIAL P2P MARKET</b> ☕\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "✨ <b>Gara gabaa USDT P2P saffisaa fi amanamaa ta'etti nagaan dhuftan!</b>\n\n"
+            "✨ <b>Gara gabaa Buna Bonus P2P saffisaa fi amanamaa ta'etti nagaan dhuftan!</b>\n\n"
             "📊 <b>Gatii Jijjiirraa Har'aa፦</b>\n"
             "└ <code>1 USDT = {rate:,.2f} ETB</code>\n\n"
             "💳 <b>Karaa Kaffaltii:</b> <code>Telebirr</code>\n"
@@ -253,6 +254,7 @@ TEXTS = {
         ),
         'buy_btn': "🟢 USDT Bitachuu (Buy)",
         'sell_btn': "🔴 USDT Gurguruu (Sell)",
+        'webapp_btn': "🚀 Buna Bonus Mini App Bani",
         'enter_amount_buy': (
             "🟢 <b>Hanga Bitachuu Barbaaddan Galchaa (BUY USDT)</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -320,9 +322,9 @@ TEXTS = {
     },
     'en': {
         'welcome': (
-            "💎 <b>OFFICIAL USDT P2P MARKET</b> 💎\n"
+            "☕ <b>BUNA BONUS OFFICIAL P2P MARKET</b> ☕\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "✨ <b>Welcome to the fast and secure USDT P2P Market!</b>\n\n"
+            "✨ <b>Welcome to Buna Bonus Official P2P Market!</b>\n\n"
             "📊 <b>Today's Exchange Rate:</b>\n"
             "└ <code>1 USDT = {rate:,.2f} ETB</code>\n\n"
             "💳 <b>Payment Method:</b> <code>Telebirr</code>\n"
@@ -332,6 +334,7 @@ TEXTS = {
         ),
         'buy_btn': "🟢 Buy USDT",
         'sell_btn': "🔴 Sell USDT",
+        'webapp_btn': "🚀 Open Buna Bonus Mini App",
         'enter_amount_buy': (
             "🟢 <b>Enter Amount to Buy (BUY USDT)</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -399,9 +402,9 @@ TEXTS = {
     },
     'so': {
         'welcome': (
-            "💎 <b>OFFICIAL USDT P2P MARKET</b> 💎\n"
+            "☕ <b>BUNA BONUS OFFICIAL P2P MARKET</b> ☕\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
-            "✨ <b>Ku soo dhowow suuqa USDT P2P ee degdega ah oo ammaan ah!</b>\n\n"
+            "✨ <b>Ku soo dhowow Buna Bonus Official P2P Market!</b>\n\n"
             "📊 <b>Qiimaha Sarifka Maanta፦</b>\n"
             "└ <code>1 USDT = {rate:,.2f} ETB</code>\n\n"
             "💳 <b>Habka Bixinta:</b> <code>Telebirr</code>\n"
@@ -411,6 +414,7 @@ TEXTS = {
         ),
         'buy_btn': "🟢 Iibso USDT (Buy)",
         'sell_btn': "🔴 Iibi USDT (Sell)",
+        'webapp_btn': "🚀 Fur Buna Bonus Mini App",
         'enter_amount_buy': (
             "🟢 <b>Gali inta aad iibsanirabto (BUY USDT)</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -520,8 +524,11 @@ async def select_language(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         txt = get_txt(context)
         rate = db_get_rate()
         
+        webapp_url = os.environ.get("WEB_APP_URL", "https://google.com")
+        
         keyboard = [
             [InlineKeyboardButton(txt['buy_btn'], callback_data="trade_buy"), InlineKeyboardButton(txt['sell_btn'], callback_data="trade_sell")],
+            [InlineKeyboardButton(txt['webapp_btn'], web_app=WebAppInfo(url=webapp_url))],
             [InlineKeyboardButton(txt['btn_support'], callback_data="bot_support")]
         ]
         await query.message.edit_text(txt['welcome'].format(rate=rate), reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
@@ -749,12 +756,13 @@ async def admin_decision_handler(update: Update, context: ContextTypes.DEFAULT_T
             )
 
 async def admin_media_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if not update.message or not update.message.from_user or update.message.from_user.id != ADMIN_ID:
+    Info = update.message
+    if not Info or not Info.from_user or Info.from_user.id != ADMIN_ID:
         return
 
     proof_target_id = context.bot_data.get('proof_target_id')
-    if proof_target_id and update.message.photo:
-        photo_id = update.message.photo[-1].file_id
+    if proof_target_id and Info.photo:
+        photo_id = Info.photo[-1].file_id
         caption_text = (
             "🎉 <b>ORDER COMPLETED SUCCESSFULLY!</b>\n"
             "━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -762,19 +770,19 @@ async def admin_media_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
             "Thank you for trading with us! 🙏"
         )
         await context.bot.send_photo(chat_id=proof_target_id, photo=photo_id, caption=caption_text, parse_mode="HTML")
-        await update.message.reply_text(f"✅ Payment proof sent to User ID <code>{proof_target_id}</code>!", parse_mode="HTML")
+        await Info.reply_text(f"✅ Payment proof sent to User ID <code>{proof_target_id}</code>!", parse_mode="HTML")
         context.bot_data.pop('proof_target_id', None)
         return
 
     reply_target_id = context.bot_data.get('reply_target_id')
-    if reply_target_id and update.message.text:
-        reply_text = update.message.text
+    if reply_target_id and Info.text:
+        reply_text = Info.text
         await context.bot.send_message(
             chat_id=reply_target_id,
             text=f"💬 <b>Admin Message:</b>\n━━━━━━━━━━━━━━━━━━━━━━\n{reply_text}",
             parse_mode="HTML"
         )
-        await update.message.reply_text(f"✅ Message sent to User ID <code>{reply_target_id}</code>!", parse_mode="HTML")
+        await Info.reply_text(f"✅ Message sent to User ID <code>{reply_target_id}</code>!", parse_mode="HTML")
         context.bot_data.pop('reply_target_id', None)
 
 async def cancel_button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -815,7 +823,7 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(admin_decision_handler, pattern="^(proof_|approve_|reject_|reply_)"))
     app.add_handler(MessageHandler(filters.PHOTO | (filters.TEXT & ~filters.COMMAND), admin_media_handler))
 
-    logger.info("Buna Bonus P2P Bot running with Multilingual and Professional AI features...")
+    logger.info("Buna Bonus P2P Bot running with WebApp and Multi-language Support...")
     app.run_polling()
 
 if __name__ == "__main__":
