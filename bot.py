@@ -1,4 +1,5 @@
 import logging
+import os
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
     ApplicationBuilder,
@@ -16,9 +17,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# የቦት እና አድሚን መረጃዎች
-TOKEN = "8477592504:AAGjyhk0EPH4TTZ6pAb3o7M6obgTA15V5Z4"
-ADMIN_ID = 7798227927
+# የቦት እና አድሚን መረጃዎች (የRailway Environment Variables መጠቀም ይቻላል)
+TOKEN = os.getenv("TOKEN", "8477592504:AAGjyhk0EPH4TTZ6pAb3o7M6obgTA15V5Z4")
+ADMIN_ID = int(os.getenv("ADMIN_ID", "7798227927"))
 
 # ደንቦች እና አድራሻዎች
 MIN_USDT = 15.0
@@ -53,7 +54,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = query.from_user.id
     data = query.data
 
-    # 1. ቋንቋ ሲመረጥ
     if data.startswith("lang_"):
         lang = data.split("_")[1]
         USER_STATES[user_id] = {"lang": lang}
@@ -89,7 +89,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         USER_STATES[user_id]["state"] = "AWAITING_AMOUNT"
         await query.edit_message_text(text=text, parse_mode="Markdown")
 
-    # 2. ተጠቃሚው የሚቀበልበትን መንገድ (TRC20 ወይም Mastercard) ሲመርጥ
     elif data.startswith("recv_"):
         recv_method = data.split("_")[1]
         USER_STATES[user_id]["recv_method"] = recv_method
@@ -119,7 +118,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang = state_data.get("lang", "am")
     current_state = state_data.get("state")
 
-    # 1. መጠን (Amount) መቀበል
     if current_state == "AWAITING_AMOUNT" and update.message.text:
         try:
             amount = float(update.message.text)
@@ -178,13 +176,11 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             await update.message.reply_text(msg)
 
-    # 2. የብር ክፍያ Screenshot ሲላክ
     elif current_state == "AWAITING_PAYMENT_SCREENSHOT" and update.message.photo:
         photo_file = update.message.photo[-1].file_id
         USER_STATES[user_id]["payment_photo"] = photo_file
         USER_STATES[user_id]["state"] = "CHOOSE_RECEIVE_METHOD"
 
-        # ተጠቃሚው USDT የሚቀበልበትን መንገድ እንዲመርጥ ቁልፎችን ማሳየት
         keyboard = [
             [
                 InlineKeyboardButton(
@@ -207,7 +203,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             msg, reply_markup=reply_markup, parse_mode="Markdown"
         )
 
-    # 3. ተጠቃሚው የዋሌት አድራሻውን ወይም የካርድ መረጃውን ሲጽፍ (ለአድሚን የመጨረሻ መረጃ ማስተላለፍ)
     elif current_state == "AWAITING_WALLET_INFO" and update.message.text:
         wallet_info = update.message.text
         amount = state_data.get("amount")
@@ -215,7 +210,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         recv_method = state_data.get("recv_method", "N/A").upper()
         payment_photo = state_data.get("payment_photo")
 
-        # ለአድሚን የሚላኩ ሙሉ መረጃዎች
         admin_msg = (
             f"🚨 **አዲስ የተጠናቀቀ P2P ትዕዛዝ (BIRRBOUNSP2P)!**\n\n"
             f"👤 ተጠቃሚ: {user.first_name} (@{user.username})\n"
@@ -227,7 +221,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
         try:
-            # ፎቶውን ከሙሉ መረጃው ጋር ለአድሚን መላክ
             await context.bot.send_photo(
                 chat_id=ADMIN_ID,
                 photo=payment_photo,
@@ -237,7 +230,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             logger.error(f"Failed to send to admin: {e}")
 
-        # ለተጠቃሚው ማረጋገጫ መስጠት
         if lang == "am":
             confirm_msg = f"🎉 ትዕዛዝዎ በትክክል ተመዝግቦ ለአድሚን ተልኳል!\n\nየከፈሉትን ብር አረጋግጠን በ **{recv_method}** አማካኝነት የጠየቁትን **{amount} USDT** ገቢ እናደርግልዎታለን። እናመሰግናለን!"
         else:
@@ -256,7 +248,7 @@ def main():
         MessageHandler(filters.TEXT | filters.PHOTO, handle_message)
     )
 
-    print("BIRRBOUNSP2P Bot is running smoothly...")
+    print("BIRRBOUNSP2P Bot is running smoothly on Railway...")
     app.run_polling()
 
 
